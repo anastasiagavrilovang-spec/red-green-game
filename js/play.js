@@ -1,6 +1,6 @@
 // Team page, opened from the QR code as play.html?g=GAMEID. One phone per team.
 import { connect } from "./firebase.js";
-import { NAME_MAX, nameProblem, cleanName, myTeamId, activeTeamIds } from "./game.js";
+import { NAME_MAX, nameProblem, cleanName, myTeamId, activeTeamIds, movingTeamIds } from "./game.js";
 import { $, esc, signed, signClass, sortedTeams, friendly, connectionBanner, store } from "./ui.js";
 
 const app = $("#app");
@@ -49,6 +49,8 @@ const voteKey = (round) => `rgg.vote.${gameId}.${round}`;
 const card = (html) => `<section class="card">${html}</section>`;
 const messageHTML = () => (local.message ? `<p class="notice">${esc(local.message)}</p>` : "");
 const ownTeamId = () => myTeamId(game.teams, api.uid());
+const moving = () => movingTeamIds(game.teams, game.moving);
+const onHold = () => ["ready", "voting", "revealed"].includes(game.state.status) && moving().length > 0;
 
 function total(teamId) {
   let sum = game.settings.startingPoints;
@@ -112,6 +114,12 @@ function teamScreen(teamId) {
   if (team.removed) {
     return card(`${header}<h2 class="center">You have been removed from the game</h2>
       <p class="muted center">Thanks for playing. Your scores so far stay on the big screen.</p>`);
+  }
+
+  // A team is moving to a new phone: everyone waits, then this screen updates by itself.
+  if (onHold()) {
+    return card(`${header}<h2 class="center">The game will resume shortly</h2>
+      <p class="center muted">A team is moving to a new phone. Please wait, there's nothing to do on this phone.</p>`);
   }
 
   switch (status) {
@@ -199,7 +207,9 @@ function joinScreen() {
   const lobby = game.state.status === "lobby";
 
   if (local.view === "rejoin-pick") {
-    const teams = sortedTeams(game.teams).filter(([id]) => activeTeamIds(game.teams).includes(id));
+    // While a move is on, only the teams waiting for a new phone are offered.
+    const offered = moving().length ? moving() : activeTeamIds(game.teams);
+    const teams = sortedTeams(game.teams).filter(([id]) => offered.includes(id));
     return card(`<h2>Rejoin my team</h2>
       <p class="muted">Ask the facilitator to press Reset phone for your team, then pick your team here.</p>
       ${teams.length ? `<div class="team-choices">${teams.map(([id, t]) =>
@@ -220,6 +230,12 @@ function joinScreen() {
         <button class="wide" type="submit" ${local.sending ? "disabled" : ""}>${local.sending ? "Checking…" : "Rejoin"}</button>
       </form>
       <button class="link-button wide" data-action="rejoin">Pick another team</button>`);
+  }
+
+  if (!lobby && moving().length) {
+    return card(`<h2>Moving a team to this phone?</h2>
+      <p class="muted">Tap Rejoin my team, pick your team and type the 4-digit code from the facilitator.</p>
+      <button class="wide" data-action="rejoin">Rejoin my team</button>`);
   }
 
   if (!lobby) {

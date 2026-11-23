@@ -1,6 +1,6 @@
 // Big screen for the projector, opened as screen.html?g=GAMEID. Read-only: it only watches the game.
 import { connect } from "./firebase.js";
-import { activeTeamIds } from "./game.js";
+import { activeTeamIds, movingTeamIds } from "./game.js";
 import { $, esc, sortedTeams, connectionBanner, pageLink } from "./ui.js";
 import { showQR } from "./qr.js";
 import { scoreTableHTML } from "./table.js";
@@ -48,13 +48,15 @@ function render() {
   }
   const { status, round } = game.state;
   const screens = { lobby: lobbyHTML, ready: readyHTML, voting: votingHTML, revealing: revealingHTML, revealed: tableHTML, ended: tableHTML };
+  const moving = movingTeamIds(game.teams, game.moving);
+  const hold = ["ready", "voting", "revealed"].includes(status) && moving.length > 0;
 
   app.innerHTML = `
     <header class="screen-top">
       <h1>Red Green Game</h1>
-      <span class="screen-step">${esc(STEP[status]?.(round) ?? status)}</span>
+      <span class="screen-step">${hold ? "On hold" : esc(STEP[status]?.(round) ?? status)}</span>
     </header>
-    ${(screens[status] ?? (() => ""))()}`;
+    ${hold ? holdHTML(moving) : (screens[status] ?? (() => ""))()}`;
 
   // The QR code is drawn after the page is built; showQR skips redrawing an unchanged code.
   const qr = $("#qr");
@@ -90,6 +92,25 @@ function lobbyHTML() {
       <section class="card">
         <h2><span class="screen-count">${joined}</span> of ${game.settings.teamCount} teams joined</h2>
         ${tilesHTML(false)}
+      </section>
+    </div>`;
+}
+
+// A team is moving to a new phone: the QR code comes back so the new phone can open the game.
+function holdHTML(moving) {
+  const names = moving.map((id) => game.teams[id].name);
+  const list = names.length === 1 ? esc(names[0]) : names.map(esc).join(", ");
+  return `
+    <div class="lobby-grid">
+      <section class="card center">
+        <h2>New phone: scan here</h2>
+        <div class="qr" id="qr"></div>
+        <p class="screen-link">${esc(pageLink("play.html", gameId))}</p>
+      </section>
+      <section class="card">
+        <h2>The game will resume shortly</h2>
+        <p class="hold-who">${names.length === 1 ? "Team" : "Teams"} <strong>${list}</strong> ${names.length === 1 ? "is" : "are"} moving to a new phone.</p>
+        <p>On the new phone: scan the code, tap <strong>Rejoin my team</strong>, pick your team and type the 4-digit code from the facilitator.</p>
       </section>
     </div>`;
 }

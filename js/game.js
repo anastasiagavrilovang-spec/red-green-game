@@ -26,6 +26,11 @@ export const cleanName = (name) => String(name ?? "").trim().replace(/\s+/g, " "
 export const activeTeamIds = (teams) =>
   Object.entries(teams ?? {}).filter(([, t]) => t && !t.removed).map(([id]) => id);
 
+// Teams moving to a new phone (Reset phone pressed, new phone not in yet): while any exist,
+// the game is on hold.
+export const movingTeamIds = (teams, moving) =>
+  activeTeamIds(teams).filter((id) => moving?.[id] === true);
+
 // The team this device controls, or null.
 export const myTeamId = (teams, uid) =>
   Object.entries(teams ?? {}).find(([, t]) => t?.owner === uid)?.[0] ?? null;
@@ -41,6 +46,7 @@ export function nameProblem(name) {
 
 const same = (a, b) => a?.status === b?.status && a?.round === b?.round;
 const NOT_NOW = "That step isn't possible right now. The screen will update in a moment.";
+const ON_HOLD = "The game is on hold while a team moves to a new phone. Wait for the new phone, or press Cancel move.";
 
 function toSettings(input) {
   const n = (v) => Number(v);
@@ -59,12 +65,18 @@ export function createGameApi({ db, auth, fb }) {
   const g = (gameId, path = "") => at(`games/${gameId}${path ? "/" + path : ""}`);
   const read = async (gameId, path) => (await fb.get(g(gameId, path))).val();
 
+  async function checkNotOnHold(gameId) {
+    const [teams, moving] = await Promise.all([read(gameId, "teams"), read(gameId, "moving")]);
+    if (movingTeamIds(teams, moving).length) throw new GameError(ON_HOLD);
+  }
+
   // Moves the game from one step to the next. A move another device already made counts as done,
   // so double taps and two facilitator phones are harmless.
   async function advance(gameId, from, to) {
     const state = await read(gameId, "state");
     if (same(state, to)) return;
     if (!same(state, from)) throw new GameError(NOT_NOW);
+    await checkNotOnHold(gameId);
     try {
       await fb.set(g(gameId, "state"), to);
     } catch {
@@ -114,10 +126,10 @@ export function createGameApi({ db, auth, fb }) {
 
     // ---------- watching ----------
 
-    // Calls onChange({ settings, state, teams, voted, results, connected }) once everything has
-    // loaded, then on every change. Returns a function that stops watching.
+    // Calls onChange({ settings, state, teams, voted, results, moving, connected }) once everything
+    // has loaded, then on every change. Returns a function that stops watching.
     watchGame(gameId, onChange) {
-      const parts = ["settings", "state", "teams", "voted", "results"];
+      const parts = ["settings", "state", "teams", "voted", "results", "moving"];
       const data = { connected: true };
       const loaded = new Set();
       const send = () => { if (loaded.size === parts.length) onChange({ ...data }); };
@@ -186,7 +198,10 @@ export function createGameApi({ db, auth, fb }) {
         throw new GameError("No code is active for this team. Ask the facilitator to press Reset phone.");
       }
       try {
-        await fb.update(g(gameId), { [`teams/${teamId}/owner`]: me, [`rejoinCodes/${teamId}`]: null });
+        // Clearing "moving" in the same update lifts the hold for everyone at once.
+        await fb.update(g(gameId), {
+          [`teams/${teamId}/owner`]: me, [`rejoinCodes/${teamId}`]: null, [`moving/${teamId}`]: null
+        });
       } catch {
         const left = 5 - count;
         throw new GameError(left > 0
@@ -238,6 +253,7 @@ export function createGameApi({ db, auth, fb }) {
       if (state?.round !== round) throw new GameError(NOT_NOW);
 
       if (state.status === "voting") {
+        await checkNotOnHold(gameId);
         const [teams, voted] = await Promise.all([read(gameId, "teams"), read(gameId, `voted/${round}`)]);
         if (activeTeamIds(teams).some((id) => !voted?.[id])) throw new GameError("Not every team has voted yet");
         await advance(gameId, { status: "voting", round }, { status: "revealing", round });
@@ -276,7 +292,11 @@ export function createGameApi({ db, auth, fb }) {
         changes = { [`teams/${teamId}`]: null, [`teamNames/${normName(team.name)}`]: null };
       } else if (status === "ready" || status === "voting" || status === "revealed") {
         if (activeTeamIds(teams).length <= 2) throw new GameError("A game needs at least 2 teams");
-        changes = { [`teams/${teamId}/removed`]: true };
+        // A team removed while moving to a new phone no longer holds up the game.
+        changes = {
+          [`teams/${teamId}/removed`]: true,
+          [`moving/${teamId}`]: null, [`rejoinCodes/${teamId}`]: null, [`rejoinAttempts/${teamId}`]: null
+        };
         if (status === "voting") {
           changes[`votes/${round}/${teamId}`] = null;
           changes[`voted/${round}/${teamId}`] = null;
@@ -291,11 +311,21 @@ export function createGameApi({ db, auth, fb }) {
       }
     },
 
-    // Returns the one-time 4-digit code the new phone types in.
+    // Returns the one-time 4-digit code the new phone types in. Puts the game on hold
+    // until the new phone is in (or the move is cancelled). Pressing it again gives a new code.
     async resetPhone(gameId, teamId) {
       const code = newCode();
-      await fb.update(g(gameId), { [`rejoinCodes/${teamId}`]: code, [`rejoinAttempts/${teamId}`]: null });
+      await fb.update(g(gameId), {
+        [`rejoinCodes/${teamId}`]: code, [`rejoinAttempts/${teamId}`]: null, [`moving/${teamId}`]: true
+      });
       return code;
+    },
+
+    // The old phone works after all: forget the code and lift the hold.
+    async cancelMove(gameId, teamId) {
+      await fb.update(g(gameId), {
+        [`rejoinCodes/${teamId}`]: null, [`rejoinAttempts/${teamId}`]: null, [`moving/${teamId}`]: null
+      });
     },
 
     // ---------- records ----------

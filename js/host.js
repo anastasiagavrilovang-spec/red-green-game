@@ -2,7 +2,7 @@
 // or host.html?g=GAMEID#k=KEY (the private facilitator link).
 import { connect } from "./firebase.js";
 import { DEFAULT_SETTINGS, LIMITS, validateSettings } from "./scoring.js";
-import { activeTeamIds } from "./game.js";
+import { activeTeamIds, movingTeamIds } from "./game.js";
 import { $, esc, signed, signClass, voteHTML, sortedTeams, toast, friendly, connectionBanner, store, copyText, pageLink } from "./ui.js";
 import { showQR } from "./qr.js";
 import { scoreTableHTML } from "./table.js";
@@ -126,8 +126,9 @@ async function openGame() {
       <h1>Game <span class="code">${esc(gameId)}</span></h1>
       <span class="pill" id="step"></span>
     </header>
+    <div id="hold"></div>
     <section id="lobby-qr" class="card center hidden">
-      <h2>Teams join here</h2>
+      <h2 id="qr-title">Teams join here</h2>
       <div class="qr" id="qr"></div>
       <p class="link-text">${esc(pageLink("play.html", gameId))}</p>
     </section>
@@ -142,6 +143,7 @@ async function openGame() {
 
   $("#links").addEventListener("click", onLinkClick);
   $("#screen").addEventListener("click", onAction);
+  $("#hold").addEventListener("click", onAction);
   showQR($("#qr"), pageLink("play.html", gameId));
 
   api.watchGame(gameId, (snapshot) => {
@@ -196,17 +198,23 @@ function render() {
     return;
   }
   const { status, round } = game.state;
-  $("#step").textContent = STEP[status]?.(round) ?? status;
-  $("#lobby-qr").classList.toggle("hidden", status !== "lobby");
+  const hold = onHold();
+  $("#step").textContent = hold ? "On hold" : STEP[status]?.(round) ?? status;
+  $("#lobby-qr").classList.toggle("hidden", status !== "lobby" && !hold);
+  $("#qr-title").textContent = hold ? "New phone: scan to rejoin" : "Teams join here";
 
-  // Forget Reset phone codes once the new phone has taken over.
+  // Forget Reset phone codes once the new phone has taken over or the move was cancelled.
   for (const [id, shown] of Object.entries(codes)) {
-    if (game.teams?.[id]?.owner !== shown.owner || game.teams?.[id]?.removed) delete codes[id];
+    const team = game.teams?.[id];
+    if (team?.owner !== shown.owner || team?.removed || game.moving?.[id] !== true) delete codes[id];
   }
 
   const screens = { lobby: lobbyHTML, ready: readyHTML, voting: votingHTML, revealing: revealingHTML, revealed: revealedHTML, ended: endedHTML };
+  $("#hold").innerHTML = hold ? holdHTML() : "";
   $("#screen").innerHTML = (screens[status] ?? (() => ""))();
-  if (working) for (const b of $("#screen").querySelectorAll("button")) b.disabled = true;
+  // On hold: the next step waits until the new phone is in.
+  if (hold) for (const b of $("#screen").querySelectorAll(".sticky-action button")) b.disabled = true;
+  if (working) for (const b of app.querySelectorAll("#hold button, #screen button")) b.disabled = true;
 
   if (status === "revealing" && !resuming) {
     resuming = true;
@@ -216,6 +224,33 @@ function render() {
 
 const active = () => activeTeamIds(game.teams);
 const canDelete = () => game.state.status === "lobby" || active().length > 2;
+const moving = () => movingTeamIds(game.teams, game.moving);
+const onHold = () => ["ready", "voting", "revealed"].includes(game.state.status) && moving().length > 0;
+
+// Shown at the top while a team is moving to a new phone.
+function holdHTML() {
+  return `
+    <section class="card hold">
+      <h2>On hold: moving to a new phone</h2>
+      <p class="muted small">Teams' phones show "The game will resume shortly". It carries on by itself once the new phone is in.</p>
+      <ul class="teams">${moving().map((id) => {
+        const team = game.teams[id];
+        const code = codes[id];
+        return `
+          <li class="team">
+            <div class="team-head"><span class="team-name">${esc(team.name)}</span><span class="status no">Waiting for new phone…</span></div>
+            ${code
+              ? `<div class="rejoin-code">Code for the new phone: <span class="code">${code.code}</span><br>
+                <span class="small">On the new phone: scan the QR code (big screen or below), choose "Rejoin my team", pick ${esc(team.name)} and type this code.</span></div>`
+              : `<p class="notice small">This page was reloaded, so the code is no longer shown. Press New code to get a fresh one.</p>`}
+            <div class="row-buttons">
+              <button class="small secondary" data-action="newcode" data-team="${id}">New code</button>
+              <button class="small secondary" data-action="cancel-move" data-team="${id}">Cancel move</button>
+            </div>
+          </li>`;
+      }).join("")}</ul>
+    </section>`;
+}
 
 function teamListHTML({ showVoted = false, actions = [] } = {}) {
   const { round } = game.state;
@@ -228,9 +263,9 @@ function teamListHTML({ showVoted = false, actions = [] } = {}) {
     const voted = game.voted?.[round]?.[id] === true;
     const buttons = [];
     if (actions.includes("clear") && voted) buttons.push(`<button class="small secondary" data-action="clear" data-team="${id}">Clear vote</button>`);
-    if (actions.includes("reset")) buttons.push(`<button class="small secondary" data-action="reset" data-team="${id}">Reset phone</button>`);
+    const isMoving = game.moving?.[id] === true;
+    if (actions.includes("reset") && !isMoving) buttons.push(`<button class="small secondary" data-action="reset" data-team="${id}">Reset phone</button>`);
     if (actions.includes("delete")) buttons.push(`<button class="small danger" data-action="delete" data-team="${id}" ${canDelete() ? "" : "disabled"}>Delete team</button>`);
-    const code = codes[id];
     return `
       <li class="team">
         <div class="team-head">
@@ -238,8 +273,7 @@ function teamListHTML({ showVoted = false, actions = [] } = {}) {
           ${showVoted ? `<span class="status ${voted ? "yes" : "no"}">${voted ? "✓ Voted" : "Waiting…"}</span>` : ""}
         </div>
         ${buttons.length ? `<div class="row-buttons">${buttons.join("")}</div>` : ""}
-        ${code ? `<div class="rejoin-code">Code for the new phone: <span class="code">${code.code}</span><br>
-          <span class="small">On the new phone: open the join link, choose "Rejoin my team", pick ${esc(team.name)} and type this code.</span></div>` : ""}
+        ${isMoving ? `<p class="small muted">Moving to a new phone: see the top of the page.</p>` : ""}
       </li>`;
   }).join("")}</ul>
   ${actions.includes("delete") && !canDelete() ? `<p class="small muted">A game needs at least 2 teams, so no more teams can be deleted.</p>` : ""}`;
@@ -411,10 +445,16 @@ function onAction(event) {
       return run(() => api.deleteTeam(gameId, teamId));
     }
     case "reset":
-      if (!confirm(`Move team ${name} to a new phone? You'll get a 4-digit code for the new phone, and their current phone will stop working for the team.`)) return;
+      if (!confirm(`Move team ${name} to a new phone? The game goes on hold and the QR code shows again until the new phone is in. You'll get a 4-digit code for the new phone.`)) return;
+    // falls through
+    case "newcode":
       return run(async () => {
-        codes[teamId] = { code: await api.resetPhone(gameId, teamId), owner: team.owner };
+        const code = await api.resetPhone(gameId, teamId);
+        codes[teamId] = { code, owner: team.owner };
       });
+    case "cancel-move":
+      if (!confirm(`Cancel moving ${name}? Their current phone keeps playing for the team.`)) return;
+      return run(() => api.cancelMove(gameId, teamId));
     case "download":
       return run(async () => downloadGames([await api.getGame(gameId)]));
   }
