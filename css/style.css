@@ -240,6 +240,7 @@ body.screen { font-size: 24px; }
 .screen-empty { font-size: 1.3rem; color: var(--muted); }
 .screen-link { font-size: 1.1rem; color: var(--muted); overflow-wrap: anywhere; }
 .screen .qr img, .screen .qr canvas { width: 360px; height: 360px; }
+.hold-who { font-size: 1.5rem; }
 .lobby-grid { display: grid; grid-template-columns: minmax(380px, 460px) 1fr; gap: 24px; align-items: start; }
 @media (max-width: 900px) { .lobby-grid { grid-template-columns: 1fr; } }
 
