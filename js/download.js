@@ -28,10 +28,15 @@ function sheet(XLSX, rows, firstColumnWidth) {
 }
 
 // games: one or more games as returned by getGame / listGames.
-export async function downloadGames(games) {
+export async function buildWorkbook(games) {
   const XLSX = await load();
   const book = XLSX.utils.book_new();
   if (games.length > 1) XLSX.utils.book_append_sheet(book, sheet(XLSX, overviewRows(games), 18), "All games");
   for (const game of games) XLSX.utils.book_append_sheet(book, sheet(XLSX, gameSheetRows(game), 24), sheetName(game));
+  return { XLSX, book };
+}
+
+export async function downloadGames(games) {
+  const { XLSX, book } = await buildWorkbook(games);
   XLSX.writeFile(book, fileName(games));
 }

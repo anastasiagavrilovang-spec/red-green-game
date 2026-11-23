@@ -89,7 +89,8 @@ export function createGameApi({ db, auth, fb }) {
 
     // ---------- setting up ----------
 
-    async createGame(input = DEFAULT_SETTINGS) {
+    // { test: true } marks a game made by the Check page: it is left out of Records.
+    async createGame(input = DEFAULT_SETTINGS, { test = false } = {}) {
       if (Object.keys(validateSettings(input)).length) throw new GameError("Please fix the settings first");
       const settings = toSettings(input);
       const key = newKey();
@@ -98,7 +99,7 @@ export function createGameApi({ db, auth, fb }) {
         try {
           await fb.set(g(gameId), {
             settings, state: { status: "lobby", round: 0 }, hostKey: key,
-            hosts: { [uid()]: key }, createdAt: fb.serverTimestamp()
+            hosts: { [uid()]: key }, createdAt: fb.serverTimestamp(), ...(test ? { test: true } : {})
           });
           return { gameId, key };
         } catch {
@@ -351,10 +352,11 @@ export function createGameApi({ db, auth, fb }) {
       }
     },
 
-    // All games, newest first, in the shape export.js expects.
+    // All real games (not Check page test games), newest first, in the shape export.js expects.
     async listGames() {
       const games = (await fb.get(at("games"))).val() ?? {};
       return Object.entries(games)
+        .filter(([, game]) => game?.test !== true)
         .map(([id, game]) => ({ id, ...game }))
         .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
     }

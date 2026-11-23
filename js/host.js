@@ -65,7 +65,8 @@ function showSetup() {
       <fieldset><legend>Points per round</legend>${FIELDS.filter((f) => f.scoring).map(field).join("")}</fieldset>
       <button id="create" class="wide" type="submit">Create game</button>
     </form>
-    <a class="button secondary wide" href="records.html">Past games</a>`;
+    <a class="button secondary wide" href="records.html">Past games</a>
+    <p></p><a class="button secondary wide" href="check.html">Check the game works</a>`;
 
   const form = $("#setup");
   const read = () => {
