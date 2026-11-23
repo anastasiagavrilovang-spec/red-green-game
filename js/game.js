@@ -126,10 +126,10 @@ export function createGameApi({ db, auth, fb }) {
 
     // ---------- watching ----------
 
-    // Calls onChange({ settings, state, teams, voted, results, moving, connected }) once everything
-    // has loaded, then on every change. Returns a function that stops watching.
+    // Calls onChange({ settings, state, teams, voted, results, moving, showJoin, connected }) once
+    // everything has loaded, then on every change. Returns a function that stops watching.
     watchGame(gameId, onChange) {
-      const parts = ["settings", "state", "teams", "voted", "results", "moving"];
+      const parts = ["settings", "state", "teams", "voted", "results", "moving", "showJoin"];
       const data = { connected: true };
       const loaded = new Set();
       const send = () => { if (loaded.size === parts.length) onChange({ ...data }); };
@@ -319,6 +319,11 @@ export function createGameApi({ db, auth, fb }) {
         [`rejoinCodes/${teamId}`]: code, [`rejoinAttempts/${teamId}`]: null, [`moving/${teamId}`]: true
       });
       return code;
+    },
+
+    // Shows or hides the joining QR code on the big screen during the game.
+    async setShowJoin(gameId, on) {
+      await fb.set(g(gameId, "showJoin"), on ? true : null);
     },
 
     // The old phone works after all: forget the code and lift the hold.

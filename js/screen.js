@@ -56,7 +56,7 @@ function render() {
       <h1>Red Green Game</h1>
       <span class="screen-step">${hold ? "On hold" : esc(STEP[status]?.(round) ?? status)}</span>
     </header>
-    ${hold ? holdHTML(moving) : (screens[status] ?? (() => ""))()}`;
+    ${hold ? holdHTML(moving) : (showJoin(status) ? joinStripHTML() : "") + (screens[status] ?? (() => ""))()}`;
 
   // The QR code is drawn after the page is built; showQR skips redrawing an unchanged code.
   const qr = $("#qr");
@@ -94,6 +94,22 @@ function lobbyHTML() {
         ${tilesHTML(false)}
       </section>
     </div>`;
+}
+
+// The facilitator pressed "Show joining QR code" during the game (e.g. a team closed its page).
+const showJoin = (status) => game.showJoin === true && ["ready", "voting", "revealing", "revealed"].includes(status);
+
+function joinStripHTML() {
+  return `
+    <section class="card join-strip">
+      <div class="qr" id="qr"></div>
+      <div>
+        <h2>Closed the game page? Scan to get back in</h2>
+        <p>On the same phone you're straight back in your team.</p>
+        <p class="muted">On a different phone, ask the facilitator.</p>
+        <p class="screen-link">${esc(pageLink("play.html", gameId))}</p>
+      </div>
+    </section>`;
 }
 
 // A team is moving to a new phone: the QR code comes back so the new phone can open the game.

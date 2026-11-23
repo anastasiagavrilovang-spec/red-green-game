@@ -126,6 +126,7 @@ async function openGame() {
       <h1>Game <span class="code">${esc(gameId)}</span></h1>
       <span class="pill" id="step"></span>
     </header>
+    <div id="join-toggle"></div>
     <div id="hold"></div>
     <section id="lobby-qr" class="card center hidden">
       <h2 id="qr-title">Teams join here</h2>
@@ -144,6 +145,7 @@ async function openGame() {
   $("#links").addEventListener("click", onLinkClick);
   $("#screen").addEventListener("click", onAction);
   $("#hold").addEventListener("click", onAction);
+  $("#join-toggle").addEventListener("click", onAction);
   showQR($("#qr"), pageLink("play.html", gameId));
 
   api.watchGame(gameId, (snapshot) => {
@@ -211,10 +213,11 @@ function render() {
 
   const screens = { lobby: lobbyHTML, ready: readyHTML, voting: votingHTML, revealing: revealingHTML, revealed: revealedHTML, ended: endedHTML };
   $("#hold").innerHTML = hold ? holdHTML() : "";
+  $("#join-toggle").innerHTML = joinToggleHTML(hold);
   $("#screen").innerHTML = (screens[status] ?? (() => ""))();
   // On hold: the next step waits until the new phone is in.
   if (hold) for (const b of $("#screen").querySelectorAll(".sticky-action button")) b.disabled = true;
-  if (working) for (const b of app.querySelectorAll("#hold button, #screen button")) b.disabled = true;
+  if (working) for (const b of app.querySelectorAll("#join-toggle button, #hold button, #screen button")) b.disabled = true;
 
   if (status === "revealing" && !resuming) {
     resuming = true;
@@ -226,6 +229,16 @@ const active = () => activeTeamIds(game.teams);
 const canDelete = () => game.state.status === "lobby" || active().length > 2;
 const moving = () => movingTeamIds(game.teams, game.moving);
 const onHold = () => ["ready", "voting", "revealed"].includes(game.state.status) && moving().length > 0;
+
+// During the game: puts the joining QR code on the big screen, e.g. for a team that closed its page.
+// Not needed in the lobby or on hold (the QR code is shown anyway), nor after the game.
+function joinToggleHTML(hold) {
+  if (!["ready", "voting", "revealing", "revealed"].includes(game.state.status) || hold) return "";
+  return game.showJoin
+    ? `<div class="card join-on"><p><strong>The joining QR code is on the big screen.</strong></p>
+        <button class="wide secondary" data-action="hide-join">Hide QR code on big screen</button></div>`
+    : `<button class="wide secondary join-button" data-action="show-join">Show joining QR code on big screen</button>`;
+}
 
 // Shown at the top while a team is moving to a new phone.
 function holdHTML() {
@@ -452,6 +465,10 @@ function onAction(event) {
         const code = await api.resetPhone(gameId, teamId);
         codes[teamId] = { code, owner: team.owner };
       });
+    case "show-join":
+      return run(() => api.setShowJoin(gameId, true));
+    case "hide-join":
+      return run(() => api.setShowJoin(gameId, false));
     case "cancel-move":
       if (!confirm(`Cancel moving ${name}? Their current phone keeps playing for the team.`)) return;
       return run(() => api.cancelMove(gameId, teamId));
