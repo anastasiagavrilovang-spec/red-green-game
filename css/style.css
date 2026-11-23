@@ -241,6 +241,14 @@ body.screen { font-size: 24px; }
 .screen-link { font-size: 1.1rem; color: var(--muted); overflow-wrap: anywhere; }
 .screen .qr img, .screen .qr canvas { width: 360px; height: 360px; }
 .hold-who { font-size: 1.5rem; }
+.join-strip { display: flex; align-items: center; gap: 32px; }
+.join-strip .qr { padding: 0; flex: none; }
+.screen .join-strip .qr img, .screen .join-strip .qr canvas { width: 260px; height: 260px; }
+.join-strip p { font-size: 1.3rem; }
+/* With the QR strip above it, the table shrinks a bit more so it still fits on one screen */
+.join-strip ~ .screen-table .score-table { font-size: clamp(12px, calc((100vh - 590px) / (var(--rows) + 1) / 2.3), 40px); }
+.join-button { margin-bottom: var(--gap); }
+.join-on { background: var(--accent-soft); }
 .lobby-grid { display: grid; grid-template-columns: minmax(380px, 460px) 1fr; gap: 24px; align-items: start; }
 @media (max-width: 900px) { .lobby-grid { grid-template-columns: 1fr; } }
 
